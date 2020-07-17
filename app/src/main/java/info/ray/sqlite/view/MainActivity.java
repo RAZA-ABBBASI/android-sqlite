@@ -3,6 +3,7 @@ package info.ray.sqlite.view;
 import android.content.DialogInterface;
 import android.os.Bundle;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.EditText;
@@ -17,7 +18,13 @@ import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.android.volley.VolleyError;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.google.gson.Gson;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,10 +32,17 @@ import java.util.List;
 import info.ray.sqlite.R;
 import info.ray.sqlite.database.DatabaseHelper;
 import info.ray.sqlite.database.model.Note;
+import info.ray.sqlite.utils.IResult;
 import info.ray.sqlite.utils.MyDividerItemDecoration;
 import info.ray.sqlite.utils.RecyclerTouchListener;
+import info.ray.sqlite.utils.Utils;
+import info.ray.sqlite.utils.VolleyService;
 
-public class MainActivity extends AppCompatActivity {
+import static java.lang.Thread.sleep;
+
+public class MainActivity extends AppCompatActivity implements IResult{
+
+    private String TAG="MainActivity";
     private NotesAdapter mAdapter;
     private List<Note> notesList = new ArrayList<>();
     private CoordinatorLayout coordinatorLayout;
@@ -36,6 +50,9 @@ public class MainActivity extends AppCompatActivity {
     private TextView noNotesView;
 
     private DatabaseHelper db;
+
+    private VolleyService mVolleyService;
+    private IResult mResultCallback = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -50,7 +67,8 @@ public class MainActivity extends AppCompatActivity {
 
         db = new DatabaseHelper(this);
 
-        notesList.addAll(db.getAllNotes());
+        //notesList.addAll(db.getAllNotes());
+
 
         FloatingActionButton fab = (FloatingActionButton) findViewById(R.id.fab);
         fab.setOnClickListener(new View.OnClickListener() {
@@ -66,7 +84,7 @@ public class MainActivity extends AppCompatActivity {
         recyclerView.setItemAnimator(new DefaultItemAnimator());
         recyclerView.addItemDecoration(new MyDividerItemDecoration(this, LinearLayoutManager.VERTICAL, 16));
         recyclerView.setAdapter(mAdapter);
-
+        getAllNotes();
         toggleEmptyNotes();
 
         /**
@@ -222,7 +240,8 @@ public class MainActivity extends AppCompatActivity {
                     updateNote(inputNote.getText().toString(), position);
                 } else {
                     // create new note
-                    createNote(inputNote.getText().toString());
+                    //createNote(inputNote.getText().toString());
+                    addNewNote(inputNote.getText().toString());
                 }
             }
         });
@@ -234,10 +253,183 @@ public class MainActivity extends AppCompatActivity {
     private void toggleEmptyNotes() {
         // you can check notesList.size() > 0
 
-        if (db.getNotesCount() > 0) {
+        if (notesList.size() > 0) {
             noNotesView.setVisibility(View.GONE);
         } else {
             noNotesView.setVisibility(View.VISIBLE);
         }
+    }
+
+
+
+    /**
+     * Method will Fetch Data from API
+     */
+    /**
+     * Method will Fetch/Delete Stored Records from Database
+     */
+    private void getAllNotes() {
+        if (Utils.isOnline(MainActivity.this)) {
+            Log.d(TAG,"getAllNotes()");
+            mResultCallback = new IResult() {
+                @Override
+                public void notifySuccess(String requestType, String response) {
+                    Log.d(TAG, "Volley JSON post" + response);
+
+
+                    try {
+                        if(requestType.equalsIgnoreCase("get_all_notes")){
+
+                            JSONArray responseArray=new JSONArray(response);
+                            Log.d(TAG,responseArray.toString());
+                            if (responseArray.length() > 0) {
+                                for (int i = 0; i < responseArray.length(); i++) {
+                                    JSONObject responseObject=responseArray.getJSONObject(i);
+                                    Note note = new Note();
+                                    note.setId(Integer.valueOf(responseObject.get("id").toString()));
+                                    note.setNote(responseObject.get("note").toString());
+                                    note.setTimestamp(responseObject.get("timestamp").toString());
+                                    notesList.add(note);
+                                }
+
+                                mAdapter.notifyDataSetChanged();
+                                toggleEmptyNotes();
+                            } else {
+                                Toast.makeText(MainActivity.this, "No Notes Found", Toast.LENGTH_SHORT).show();
+                            }
+
+                        }
+                    } catch (Exception je) {
+                        Log.e(TAG, je.toString());
+                    }
+                }
+
+                @Override
+                public void notifyError(String requestType, VolleyError error) {
+                    Log.d(TAG, "Volley requester " + requestType);
+                    Log.d(TAG, "Volley JSON post" + "That didn't work!");
+                    Log.e(TAG, error.toString());
+                }
+            };
+            //mResultCallback = new MainActivity();
+            mVolleyService = new VolleyService(mResultCallback, MainActivity.this);
+
+            JSONObject sendObj = new JSONObject();
+            try {
+                sendObj.put("ACTION", "get_all_notes");
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+
+            mVolleyService.postDataVolley("get_all_notes", Utils.SERVER_HOME_URL, sendObj);
+
+        } else {
+            Toast.makeText(MainActivity.this,
+                    getResources().getString(R.string.network_error),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+
+    private void addNewNote(String newNote) {
+        if (Utils.isOnline(MainActivity.this)) {
+            Log.d(TAG,"AddNewNote()");
+            mResultCallback = new IResult() {
+                @Override
+                public void notifySuccess(String requestType, String response) {
+                    Log.d(TAG, "Volley JSON post" + response);
+
+
+                    try {
+                        if(requestType.equalsIgnoreCase("add_note")){
+
+                            JSONArray responseArray=new JSONArray(response);
+                            Log.d(TAG,responseArray.toString());
+                            notesList.clear();
+                            if (responseArray.length() > 0) {
+                                for (int i = 0; i < responseArray.length(); i++) {
+                                    JSONObject responseObject=responseArray.getJSONObject(i);
+                                    Note note = new Note();
+                                    note.setId(Integer.valueOf(responseObject.get("id").toString()));
+                                    note.setNote(responseObject.get("note").toString());
+                                    note.setTimestamp(responseObject.get("timestamp").toString());
+                                    notesList.add(note);
+                                }
+
+                                mAdapter.notifyDataSetChanged();
+                                toggleEmptyNotes();
+                            } else {
+                                Toast.makeText(MainActivity.this, "No Notes Found", Toast.LENGTH_SHORT).show();
+                            }
+
+                        }
+                    } catch (Exception je) {
+                        Log.e(TAG, je.toString());
+                    }
+                }
+
+                @Override
+                public void notifyError(String requestType, VolleyError error) {
+                    Log.d(TAG, "Volley requester " + requestType);
+                    Log.d(TAG, "Volley JSON post" + "That didn't work!");
+                    Log.e(TAG, error.toString());
+                }
+            };
+            //mResultCallback = new MainActivity();
+            mVolleyService = new VolleyService(mResultCallback, MainActivity.this);
+
+            JSONObject sendObj = new JSONObject();
+            try {
+                sendObj.put("ACTION", "add_note");
+                sendObj.put("note", newNote);
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+
+            mVolleyService.postDataVolley("add_note", Utils.SERVER_HOME_URL, sendObj);
+
+        } else {
+            Toast.makeText(MainActivity.this,
+                    getResources().getString(R.string.network_error),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    public void notifySuccess(String requestType, String response) {
+        Log.d(TAG, "Volley JSON post" + response);
+
+
+        try {
+            if(requestType.equalsIgnoreCase("get_all_notes")){
+
+                JSONArray responseArray=new JSONArray(response);
+            Log.d(TAG,responseArray.toString());
+            if (responseArray.length() > 0) {
+                for (int i = 0; i < responseArray.length(); i++) {
+                    JSONObject responseObject=responseArray.getJSONObject(i);
+                    Note note = new Note();
+                    note.setId(Integer.valueOf(responseObject.get("id").toString()));
+                    note.setNote(responseObject.get("note").toString());
+                    note.setTimestamp(responseObject.get("timestamp").toString());
+                    notesList.add(note);
+                }
+
+                mAdapter.notifyDataSetChanged();
+            } else {
+                Toast.makeText(MainActivity.this, "No Notes Found", Toast.LENGTH_SHORT).show();
+            }
+
+        }
+        } catch (Exception je) {
+            Log.e(TAG, je.toString());
+        }
+    }
+
+    @Override
+    public void notifyError(String requestType, VolleyError error) {
+        Log.d(TAG, "Volley requester " + requestType);
+        Log.d(TAG, "Volley JSON post" + "That didn't work!");
+        Log.e(TAG, error.toString());
     }
 }
